@@ -261,7 +261,12 @@ var
   Style: Integer;
 begin
   case Message.Msg of
-    WM_PAINT, WM_SIZE, WM_NCHITTEST:
+    WM_ERASEBKGND:
+      if Assigned(FBGPicture) then
+        Message.Result := 1
+      else
+        Message.Result := 0;
+    WM_PAINT:
       if Assigned(FBGPicture) then
       begin
         DC := GetDC(FForm.ClientHandle);
@@ -300,8 +305,9 @@ begin
       end;
   end;
   with Message do
-    Result := CallWindowProc(
-      FOldClientWndProc, FForm.ClientHandle, Msg, wParam, lParam);
+    if Msg <> WM_ERASEBKGND then
+      Result := CallWindowProc(
+        FOldClientWndProc, FForm.ClientHandle, Msg, wParam, lParam);
 end;
 
 procedure TNLDExtraMDIProps.Notification(AComponent: TComponent;
