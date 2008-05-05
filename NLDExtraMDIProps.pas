@@ -9,8 +9,8 @@
 {                                                                             }
 { *************************************************************************** }
 {                                                                             }
-{ Date: May 3, 2008                                                           }
-{ Version: 1.0.0.1                                                            }
+{ Date: May 5, 2008                                                           }
+{ Version: 1.0.0.2                                                            }
 {                                                                             }
 { *************************************************************************** }
 
@@ -50,14 +50,17 @@ type
 
   TNLDExtraMDIProps = class(TComponent)
   private
+    FBGColor: TColor;
     FBGPicture: TNLDPicture;
-    FForm: TForm;
+    FBrush: HBRUSH;
+    FClientWnd: HWND;
     FOldClientWndProc: TFarProc;
     FOnChange: TNotifyEvent;
     FShowScrollBars: Boolean;
     FShowClientEdge: Boolean;
     procedure BackgroundPictureChanged(Sender: TObject);
     procedure NewClientWndProc(var Message: TMessage);
+    procedure SetBackgroundColor(const Value: TColor);
     procedure SetBackgroundPicture(const Value: TNLDPicture);
     procedure SetShowClientEdge(const Value: Boolean);
     procedure SetShowScrollBars(const Value: Boolean);
@@ -71,6 +74,8 @@ type
   published
     property BackgroundPicture: TNLDPicture read FBGPicture
       write SetBackgroundPicture stored True;
+    property BackgroundColor: TColor read FBGColor write SetBackgroundColor
+      default clAppWorkSpace;
     property OnChange: TNotifyEvent read FOnChange write FOnChange;
     property ShowClientEdge: Boolean read FShowClientEdge
       write SetShowClientEdge default True;
@@ -81,6 +86,9 @@ type
 procedure Register;
 
 implementation
+
+uses
+  SysUtils;
 
 procedure Register;
 begin
@@ -200,13 +208,14 @@ end;
 
 { TNLDExtraMDIProps }
 
+{Remark: this version of NLDExtraMDIProps simply expects AOwner.FormStyle to
+remain fsMDIForm. To be notified when the FormStyle property changes, you
+would need an AOwner.WndProc-hook and catch CM_SHOWINGCHANGED.}
+
 procedure TNLDExtraMDIProps.BackgroundPictureChanged(Sender: TObject);
 begin
-  if Assigned(FForm) then
-  begin
-    PostMessage(FForm.ClientHandle, WM_PAINT, 0, 0);
-    Changed;
-  end;
+  PostMessage(FClientWnd, WM_PAINT, 0, 0);
+  Changed;
 end;
 
 procedure TNLDExtraMDIProps.Changed;
@@ -216,9 +225,6 @@ begin
 end;
 
 constructor TNLDExtraMDIProps.Create(AOwner: TComponent);
-{Remark: this version of NLDExtraMDIProps simply expects AOwner.FormStyle to
-remain fsMDIForm. To be notified when the FormStyle property changes, you
-would need an AOwner.WndProc-hook and catch CM_SHOWINGCHANGED.}
 begin
   inherited Create(AOwner);
   FBGPicture := TNLDPicture.Create(Self);
@@ -230,19 +236,18 @@ begin
     if AOwner is TForm then
       if TForm(AOwner).FormStyle = fsMDIForm then
       begin
-        FForm := TForm(AOwner);
-        FForm.HandleNeeded;
-        FOldClientWndProc :=
-          Pointer(GetWindowLong(FForm.ClientHandle, GWL_WNDPROC));
-        SetWindowLong(FForm.ClientHandle, GWL_WNDPROC,
+        TForm(AOwner).HandleNeeded;
+        FClientWnd := TForm(AOwner).ClientHandle;
+        FOldClientWndProc := Pointer(GetWindowLong(FClientWnd, GWL_WNDPROC));
+        SetWindowLong(FClientWnd, GWL_WNDPROC,
           Integer(MakeObjectInstance(NewClientWndProc)));
       end;
+  SetBackgroundColor(clAppWorkSpace);
 end;
 
 destructor TNLDExtraMDIProps.Destroy;
 begin
-  if Assigned(FForm) then
-    SetWindowLong(FForm.ClientHandle, GWL_WNDPROC, Integer(FOldClientWndProc));
+  SetWindowLong(FClientWnd, GWL_WNDPROC, Integer(FOldClientWndProc));
   inherited Destroy;
 end;
 
@@ -252,8 +257,7 @@ const
   EdgeStyle = WS_EX_CLIENTEDGE;
 var
   DC: HDC;
-  Height: Integer;
-  Width: Integer;
+  R: TRect;
   Left: Integer;
   Top: Integer;
   Right: Integer;
@@ -269,45 +273,38 @@ begin
     WM_PAINT:
       if Assigned(FBGPicture) then
       begin
-        DC := GetDC(FForm.ClientHandle);
+        DC := GetDC(FClientWnd);
         try
-          Height := FForm.ClientHeight;
-          Width := FForm.ClientWidth;
-          if FBGPicture.Empty then
-            FillRect(DC, Rect(0, 0, Width, Height), FForm.Brush.Handle)
-          else
+          GetClientRect(FClientWnd, R);
+          if not FBGPicture.Empty then
           begin
-            Left := (Width - FBGPicture.Bitmap.Width) div 2;
-            Top := (Height - FBGPicture.Bitmap.Height) div 2;
-            Right := (Width + FBGPicture.Bitmap.Width) div 2;
-            Bottom := (Height + FBGPicture.Bitmap.Height) div 2;
-            FillRect(DC, Rect(0, 0, Left, Height), FForm.Brush.Handle);
-            FillRect(DC, Rect(Right, 0, Width, Height), FForm.Brush.Handle);
-            FillRect(DC, Rect(Left, 0, Right, Top), FForm.Brush.Handle);
-            FillRect(DC, Rect(Left, Bottom, Right, Height), FForm.Brush.Handle);
-            BitBlt(DC, Left, Top, FBGPicture.Bitmap.Width,
-              FBGPicture.Bitmap.Height, FBGPicture.Bitmap.Canvas.Handle, 0, 0,
-              SRCCOPY);
+            Left := (R.Right - FBGPicture.Bitmap.Width) div 2;
+            Top := (R.Bottom - FBGPicture.Bitmap.Height) div 2;
+            Right := Left + FBGPicture.Bitmap.Width;
+            Bottom := Top + FBGPicture.Bitmap.Height;
+            BitBlt(DC, Left, Top, Right - Left, Bottom - Top,
+              FBGPicture.Bitmap.Canvas.Handle, 0, 0, SRCCOPY);
+            ExcludeClipRect(DC, Left, Top, Right, Bottom);
           end;
+          FillRect(DC, R, FBrush);
         finally
-          ReleaseDC(FForm.ClientHandle, DC);
+          ReleaseDC(FClientWnd, DC);
         end;
       end;
     WM_NCCALCSIZE:
-      with FForm do
       begin
-        Style := GetWindowLong(ClientHandle, GWL_STYLE);
+        Style := GetWindowLong(FClientWnd, GWL_STYLE);
         if not FShowScrollBars and ((Style and ScrollStyle) <> 0) then
-          SetWindowLong(ClientHandle, GWL_STYLE, Style and not ScrollStyle);
-        Style := GetWindowLong(ClientHandle, GWL_EXSTYLE);
+          SetWindowLong(FClientWnd, GWL_STYLE, Style and not ScrollStyle);
+        Style := GetWindowLong(FClientWnd, GWL_EXSTYLE);
         if not FShowClientEdge and ((Style and EdgeStyle) <> 0) then
-          SetWindowLong(ClientHandle, GWL_EXSTYLE, Style and not EdgeStyle);
+          SetWindowLong(FClientWnd, GWL_EXSTYLE, Style and not EdgeStyle);
       end;
   end;
   with Message do
     if Msg <> WM_ERASEBKGND then
-      Result := CallWindowProc(
-        FOldClientWndProc, FForm.ClientHandle, Msg, wParam, lParam);
+      Result := CallWindowProc(FOldClientWndProc, FClientWnd, Msg, wParam,
+        lParam);
 end;
 
 procedure TNLDExtraMDIProps.Notification(AComponent: TComponent;
@@ -316,6 +313,16 @@ begin
   inherited Notification(AComponent, Operation);
   if (AComponent = FBGPicture) and (Operation = opRemove) then
     FBGPicture := nil;
+end;
+
+procedure TNLDExtraMDIProps.SetBackgroundColor(const Value: TColor);
+begin
+  if FBGColor <> Value then
+  begin
+    FBGColor := Value;
+    DeleteObject(FBrush);
+    FBrush := CreateSolidBrush(ColorToRGB(FBGColor));
+  end;
 end;
 
 procedure TNLDExtraMDIProps.SetBackgroundPicture(const Value: TNLDPicture);
@@ -329,8 +336,7 @@ begin
   if FShowClientEdge <> Value then
   begin
     FShowClientEdge := Value;
-    if Assigned(FForm) then
-      PostMessage(FForm.ClientHandle, WM_NCCALCSIZE, 0, 0);
+    PostMessage(FClientWnd, WM_NCCALCSIZE, 0, 0);
     Changed;
   end;
 end;
@@ -340,8 +346,7 @@ begin
   if FShowScrollBars <> Value then
   begin
     FShowScrollBars := Value;
-    if Assigned(FForm) then
-      PostMessage(FForm.ClientHandle, WM_NCCALCSIZE, 0, 0);
+    PostMessage(FClientWnd, WM_NCCALCSIZE, 0, 0);
     Changed;
   end;
 end;
