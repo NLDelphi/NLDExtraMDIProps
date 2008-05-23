@@ -9,8 +9,9 @@
 {                                                                             }
 { *************************************************************************** }
 {                                                                             }
-{ Date: May 5, 2008                                                           }
-{ Version: 1.0.0.2                                                            }
+{ Edit by: Albert de Weerd                                                    }
+{ Date: May 23, 2008                                                          }
+{ Version: 2.0.0.0                                                            }
 {                                                                             }
 { *************************************************************************** }
 
@@ -50,9 +51,10 @@ type
 
   TNLDExtraMDIProps = class(TComponent)
   private
-    FBGColor: TColor;
     FBGPicture: TNLDPicture;
     FBrush: HBRUSH;
+    FChilds: TList;
+    FCleverMaximizing: Boolean;
     FClientWnd: HWND;
     FOldClientWndProc: TFarProc;
     FOnChange: TNotifyEvent;
@@ -60,10 +62,10 @@ type
     FShowClientEdge: Boolean;
     procedure BackgroundPictureChanged(Sender: TObject);
     procedure NewClientWndProc(var Message: TMessage);
-    procedure SetBackgroundColor(const Value: TColor);
     procedure SetBackgroundPicture(const Value: TNLDPicture);
     procedure SetShowClientEdge(const Value: Boolean);
     procedure SetShowScrollBars(const Value: Boolean);
+    procedure SortChildsByArea;
   protected
     procedure Changed; virtual;
     procedure Notification(AComponent: TComponent; Operation: TOperation);
@@ -74,8 +76,8 @@ type
   published
     property BackgroundPicture: TNLDPicture read FBGPicture
       write SetBackgroundPicture stored True;
-    property BackgroundColor: TColor read FBGColor write SetBackgroundColor
-      default clAppWorkSpace;
+    property CleverMaximizing: Boolean read FCleverMaximizing write
+      FCleverMaximizing default False;
     property OnChange: TNotifyEvent read FOnChange write FOnChange;
     property ShowClientEdge: Boolean read FShowClientEdge
       write SetShowClientEdge default True;
@@ -88,11 +90,56 @@ procedure Register;
 implementation
 
 uses
-  SysUtils;
+  Math, SysUtils, Contnrs;
 
 procedure Register;
 begin
   RegisterComponents('NLDelphi', [TNLDExtraMDIProps, TNLDPicture]);
+end;
+
+type
+  TWind = (N, E, S, W);
+
+function RectArea(const ARect: TRect): Integer;
+begin
+  Result := (ARect.Right - ARect.Left) * (ARect.Bottom - ARect.Top);
+end;
+
+function RectWidth(const ARect: TRect): Integer;
+begin
+  Result := ARect.Right - ARect.Left;
+end;
+
+function RectHeight(const ARect: TRect): Integer;
+begin
+  Result := ARect.Bottom - ARect.Top;
+end;
+
+function BiggestSpareRect(const BigRect, SmallRect: TRect): TRect;
+var
+  Area: array[TWind] of Integer;
+  Wind: TWind;
+  BiggestArea: TWind;
+begin
+  Area[N] := RectWidth(BigRect) *
+    Min(RectHeight(BigRect), SmallRect.Top - BigRect.Top);
+  Area[E] := Min(RectWidth(BigRect), BigRect.Right - SmallRect.Right) *
+    RectHeight(BigRect);
+  Area[S] := RectWidth(BigRect) *
+    Min(RectHeight(BigRect), BigRect.Bottom - SmallRect.Bottom);
+  Area[W] := Min(RectWidth(BigRect), SmallRect.Left - BigRect.Left) *
+    RectHeight(BigRect);
+  BiggestArea := N;
+  for Wind := N to W do
+    if Area[Wind] > Area[BiggestArea] then
+      BiggestArea := Wind;
+  CopyRect(Result, BigRect);
+  case BiggestArea of
+    N: Result.Bottom := Min(BigRect.Bottom, SmallRect.Top);
+    E: Result.Left := Max(BigRect.Left, SmallRect.Right);
+    S: Result.Top := Max(BigRect.Top, SmallRect.Bottom);
+    W: Result.Right := Min(BigRect.Right, SmallRect.Left);
+  end;
 end;
 
 { TNLDPicture }
@@ -208,6 +255,59 @@ end;
 
 { TNLDExtraMDIProps }
 
+type
+  TChildInfo = class(TObject)
+  private
+    FBounds: TRect;
+    FChild: HWND;
+    FMDIProps: TNLDExtraMDIProps;
+    FOldWndProc: Pointer;
+    procedure NewWndProc(var Message: TMessage);
+  end;
+
+procedure TChildInfo.NewWndProc(var Message: TMessage);
+var
+  MaxRect: TRect;
+  i: Integer;
+  WindowPlacement: TWindowPlacement;
+begin
+  if FMDIProps.CleverMaximizing then
+    if Message.Msg = WM_SYSCOMMAND then
+      if ((Message.WParam and $FFF0) = SC_MAXIMIZE) and
+          (GetKeyState(VK_SHIFT) <> 0) then
+        begin
+          FMDIProps.SortChildsByArea;
+          GetClientRect(FMDIProps.FClientWnd, MaxRect);
+          for i := 0 to FMDIProps.FChilds.Count - 1 do
+            if TChildInfo(FMDIProps.FChilds[i]) <> Self then
+              MaxRect := BiggestSpareRect(MaxRect,
+                TChildInfo(FMDIProps.FChilds[i]).FBounds);
+          if not (EqualRect(FBounds, MaxRect) or IsRectEmpty(MaxRect)) then
+          begin
+            WindowPlacement.Length := SizeOf(TWindowPlacement);
+            GetWindowPlacement(FChild, @WindowPlacement);
+            WindowPlacement.rcNormalPosition := MaxRect;
+            SetWindowPlacement(FChild, @WindowPlacement);
+            Exit;
+          end;
+        end;
+  with Message do
+    Result := CallWindowProc(FOldWndProc, FChild, Msg, WParam, LParam);
+end;
+
+function GetChildInfo(Childs: TList; AChild: HWND): TChildInfo;
+var
+  i: Integer;
+begin
+  Result := nil;
+  for i := 0 to Childs.Count - 1 do
+    if TChildInfo(Childs[i]).FChild = AChild then
+    begin
+      Result := TChildInfo(Childs[i]);
+      Break;
+    end;
+end;
+
 {Remark: this version of NLDExtraMDIProps simply expects AOwner.FormStyle to
 remain fsMDIForm. To be notified when the FormStyle property changes, you
 would need an AOwner.WndProc-hook and catch CM_SHOWINGCHANGED.}
@@ -241,12 +341,16 @@ begin
         FOldClientWndProc := Pointer(GetWindowLong(FClientWnd, GWL_WNDPROC));
         SetWindowLong(FClientWnd, GWL_WNDPROC,
           Integer(MakeObjectInstance(NewClientWndProc)));
+        FBrush := TForm(AOwner).Brush.Handle;
+        FChilds := TObjectList.Create(True);
+        FCleverMaximizing := True;
       end;
-  SetBackgroundColor(clAppWorkSpace);
 end;
 
 destructor TNLDExtraMDIProps.Destroy;
 begin
+  if FChilds <> nil then
+    FChilds.Free;
   SetWindowLong(FClientWnd, GWL_WNDPROC, Integer(FOldClientWndProc));
   inherited Destroy;
 end;
@@ -263,13 +367,17 @@ var
   Right: Integer;
   Bottom: Integer;
   Style: Integer;
+  ChildInfo: TChildInfo;
 begin
   case Message.Msg of
     WM_ERASEBKGND:
-      if Assigned(FBGPicture) then
-        Message.Result := 1
-      else
-        Message.Result := 0;
+      begin
+        if Assigned(FBGPicture) then
+          Message.Result := 1
+        else
+          Message.Result := 0;
+        Exit;
+      end;
     WM_PAINT:
       if Assigned(FBGPicture) then
       begin
@@ -300,11 +408,37 @@ begin
         if not FShowClientEdge and ((Style and EdgeStyle) <> 0) then
           SetWindowLong(FClientWnd, GWL_EXSTYLE, Style and not EdgeStyle);
       end;
+    WM_MDICREATE:
+      with Message do
+      begin
+        Result := CallWindowProc(FOldClientWndProc, FClientWnd, Msg, WParam,
+          LParam);
+        if Result <> 0 then
+        begin
+          ChildInfo := TChildInfo.Create;
+          ChildInfo.FChild := Result;
+          ChildInfo.FMDIProps := Self;
+          ChildInfo.FOldWndProc := Pointer(GetWindowLong(Result, GWL_WNDPROC));
+          SetWindowLong(Result, GWL_WNDPROC,
+            Integer(MakeObjectInstance(ChildInfo.NewWndProc)));
+          FChilds.Add(ChildInfo);
+        end;
+        Exit;
+      end;
+    WM_MDIDESTROY:
+      begin
+        ChildInfo := GetChildInfo(FChilds, Message.WParam);
+        if ChildInfo <> nil then
+        begin
+          SetWindowLong(ChildInfo.FChild, GWL_WNDPROC,
+            Integer(ChildInfo.FOldWndProc));
+          FChilds.Remove(ChildInfo);
+        end;
+      end;
   end;
   with Message do
-    if Msg <> WM_ERASEBKGND then
-      Result := CallWindowProc(FOldClientWndProc, FClientWnd, Msg, wParam,
-        lParam);
+    Result := CallWindowProc(FOldClientWndProc, FClientWnd, Msg, WParam,
+      LParam);
 end;
 
 procedure TNLDExtraMDIProps.Notification(AComponent: TComponent;
@@ -313,16 +447,6 @@ begin
   inherited Notification(AComponent, Operation);
   if (AComponent = FBGPicture) and (Operation = opRemove) then
     FBGPicture := nil;
-end;
-
-procedure TNLDExtraMDIProps.SetBackgroundColor(const Value: TColor);
-begin
-  if FBGColor <> Value then
-  begin
-    FBGColor := Value;
-    DeleteObject(FBrush);
-    FBrush := CreateSolidBrush(ColorToRGB(FBGColor));
-  end;
 end;
 
 procedure TNLDExtraMDIProps.SetBackgroundPicture(const Value: TNLDPicture);
@@ -349,6 +473,28 @@ begin
     PostMessage(FClientWnd, WM_NCCALCSIZE, 0, 0);
     Changed;
   end;
+end;
+
+function CompareChildArea(Item1, Item2: Pointer): Integer;
+begin
+  with TChildInfo(Item1) do
+  begin
+    GetWindowRect(FChild, FBounds);
+    ScreenToClient(FMDIProps.FClientWnd, FBounds.TopLeft);
+    ScreenToClient(FMDIProps.FClientWnd, FBounds.BottomRight);
+  end;
+  with TChildInfo(Item2) do
+  begin
+    GetWindowRect(FChild, FBounds);
+    ScreenToClient(FMDIProps.FClientWnd, FBounds.TopLeft);
+    ScreenToClient(FMDIProps.FClientWnd, FBounds.BottomRight);
+    Result := RectArea(FBounds) - RectArea(TChildInfo(Item1).FBounds);
+  end;
+end;
+
+procedure TNLDExtraMDIProps.SortChildsByArea;
+begin
+  FChilds.Sort(CompareChildArea);
 end;
 
 end.
