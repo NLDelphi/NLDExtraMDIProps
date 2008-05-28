@@ -10,8 +10,8 @@
 { *************************************************************************** }
 {                                                                             }
 { Edit by: Albert de Weerd                                                    }
-{ Date: May 23, 2008                                                          }
-{ Version: 2.0.0.0                                                            }
+{ Date: May 28, 2008                                                          }
+{ Version: 2.0.0.1                                                            }
 {                                                                             }
 { *************************************************************************** }
 
@@ -274,7 +274,7 @@ begin
   if FMDIProps.CleverMaximizing then
     if Message.Msg = WM_SYSCOMMAND then
       if ((Message.WParam and $FFF0) = SC_MAXIMIZE) and
-          (GetKeyState(VK_SHIFT) <> 0) then
+          (Hi(GetKeyState(VK_SHIFT)) <> 0) then
         begin
           FMDIProps.SortChildsByArea;
           GetClientRect(FMDIProps.FClientWnd, MaxRect);
@@ -343,7 +343,6 @@ begin
           Integer(MakeObjectInstance(NewClientWndProc)));
         FBrush := TForm(AOwner).Brush.Handle;
         FChilds := TObjectList.Create(True);
-        FCleverMaximizing := True;
       end;
 end;
 
