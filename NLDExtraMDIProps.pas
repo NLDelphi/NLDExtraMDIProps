@@ -11,7 +11,8 @@
 {                                                                             }
 { Edit by: Albert de Weerd                                                    }
 { Date: May 28, 2008                                                          }
-{ Version: 2.0.0.1                                                            }
+{ Version: 2.0.0.2                                                            }
+{ Last edit: May 27, 2011                                                     }
 {                                                                             }
 { *************************************************************************** }
 
@@ -20,7 +21,7 @@ unit NLDExtraMDIProps;
 interface
 
 uses
-  Classes, Windows, Graphics, Messages, Forms;
+  Classes, Windows, Graphics, Messages, Forms, Math, SysUtils, Contnrs;
 
 type
   TNLDPicture = class(TComponent)
@@ -33,7 +34,7 @@ type
     procedure PictureChanged(Sender: TObject);
     procedure SetBitmapResName(const Value: String);
     procedure SetFileName(const Value: String);
-    procedure SetPicture(const Value: TPicture);
+    procedure SetPicture(Value: TPicture);
   protected
     procedure Changed; virtual;
   public
@@ -62,9 +63,9 @@ type
     FShowClientEdge: Boolean;
     procedure BackgroundPictureChanged(Sender: TObject);
     procedure NewClientWndProc(var Message: TMessage);
-    procedure SetBackgroundPicture(const Value: TNLDPicture);
-    procedure SetShowClientEdge(const Value: Boolean);
-    procedure SetShowScrollBars(const Value: Boolean);
+    procedure SetBackgroundPicture(Value: TNLDPicture);
+    procedure SetShowClientEdge(Value: Boolean);
+    procedure SetShowScrollBars(Value: Boolean);
     procedure SortChildsByArea;
   protected
     procedure Changed; virtual;
@@ -85,17 +86,7 @@ type
       write SetShowScrollBars default True;
   end;
 
-procedure Register;
-
 implementation
-
-uses
-  Math, SysUtils, Contnrs;
-
-procedure Register;
-begin
-  RegisterComponents('NLDelphi', [TNLDExtraMDIProps, TNLDPicture]);
-end;
 
 type
   TWind = (N, E, S, W);
@@ -243,7 +234,7 @@ begin
   end;
 end;
 
-procedure TNLDPicture.SetPicture(const Value: TPicture);
+procedure TNLDPicture.SetPicture(Value: TPicture);
 begin
   FPicture.Assign(Value);
   if Assigned(FPicture.Graphic) then
@@ -448,13 +439,13 @@ begin
     FBGPicture := nil;
 end;
 
-procedure TNLDExtraMDIProps.SetBackgroundPicture(const Value: TNLDPicture);
+procedure TNLDExtraMDIProps.SetBackgroundPicture(Value: TNLDPicture);
 begin
   if Assigned(FBGPicture) then
     FBGPicture.Assign(Value);
 end;
 
-procedure TNLDExtraMDIProps.SetShowClientEdge(const Value: Boolean);
+procedure TNLDExtraMDIProps.SetShowClientEdge(Value: Boolean);
 begin
   if FShowClientEdge <> Value then
   begin
@@ -464,7 +455,7 @@ begin
   end;
 end;
 
-procedure TNLDExtraMDIProps.SetShowScrollBars(const Value: Boolean);
+procedure TNLDExtraMDIProps.SetShowScrollBars(Value: Boolean);
 begin
   if FShowScrollBars <> Value then
   begin
