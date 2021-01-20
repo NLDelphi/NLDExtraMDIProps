@@ -5,14 +5,7 @@
 { Initiator: Albert de Weerd (aka NGLN)                                       }
 { License: Free to use, free to modify                                        }
 { Website: http://www.nldelphi.com/forum/forumdisplay.php?f=128               }
-{ SVN path: http://svn.nldelphi.com/nldelphi/opensource/ngln/nldextramdiprops }
-{                                                                             }
-{ *************************************************************************** }
-{                                                                             }
-{ Edit by: Albert de Weerd                                                    }
-{ Date: May 28, 2008                                                          }
-{ Version: 2.0.0.2                                                            }
-{ Last edit: May 27, 2011                                                     }
+{ Source path: https://github.com/NLDelphi/NLDExtraMDIProps                   }
 {                                                                             }
 { *************************************************************************** }
 
@@ -21,7 +14,14 @@ unit NLDExtraMDIProps;
 interface
 
 uses
-  Classes, Windows, Graphics, Messages, Forms, Math, SysUtils, Contnrs;
+  System.Classes,
+  System.Math,
+  System.SysUtils,
+  System.Contnrs,
+  Winapi.Windows,
+  Winapi.Messages,
+  Vcl.Forms,
+  Vcl.Graphics;
 
 type
   TNLDPicture = class(TComponent)
